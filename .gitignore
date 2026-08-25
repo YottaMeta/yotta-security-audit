@@ -1,0 +1,15 @@
+# npm 打包
+*.tgz
+node_modules/
+
+# Python
+__pycache__/
+*.pyc
+
+# 系统
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# 测试产物
+.tmp/

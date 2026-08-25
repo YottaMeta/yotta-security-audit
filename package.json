@@ -1,0 +1,35 @@
+{
+  "name": "@yottameta/yotta-security-audit",
+  "version": "0.1.0",
+  "description": "元安 —— 检测 AI 技能恶意模式（13 类）与系统安全基线（Windows/Linux），纯只读、零依赖、有纪律。",
+  "license": "MIT",
+  "keywords": [
+    "agent-skills",
+    "yotta-security-audit",
+    "security",
+    "skill-audit",
+    "supply-chain",
+    "yottaskills"
+  ],
+  "files": [
+    "SKILL.md",
+    "LICENSE",
+    "NOTICE",
+    "README.md",
+    "CHANGELOG.md",
+    "install.sh",
+    "references",
+    "scripts",
+    "bin"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/YottaMeta/yotta-security-audit.git"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "bin": {
+    "yotta-security-audit": "bin/install.js"
+  }
+}
