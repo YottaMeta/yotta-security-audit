@@ -26,6 +26,10 @@
 | 开放端口 | ss -tln（降级 /proc/net/tcp） | 对外监听端口 |
 | 用户 crontab | crontab -l | 持久化脚本 |
 | PATH 劫持 | 环境变量 PATH 分析 | PATH 含可写目录可致命令劫持 |
+| CIS：空密码账号 | 读取 /etc/shadow | 密码字段为空 = 无需密码可登录，高危 |
+| CIS：sudo NOPASSWD | 读取 /etc/sudoers 与 /etc/sudoers.d | 免密提权条目（NOPASSWD），中危 |
+| CIS：内核参数加固 | sysctl（suid_dumpable / ASLR / ICMP 重定向 / IP 转发） | 内核参数是否处于安全基线值 |
+| CIS：登录历史 | lastb -n 50 / last -n 10 | 失败登录（暴力破解迹象）与近期登录核查 |
 
 ## 平台说明
 

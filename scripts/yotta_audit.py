@@ -53,7 +53,7 @@ _HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HERE))
 import audit_rules  # noqa: E402
 
-VERSION = "0.1.0"
+VERSION = "0.1.4"
 TOOL_NAME = "yotta-security-audit"
 
 # ── 技能目录发现（17 类智能体权威映射，与 install.js 一致）──────────────
@@ -1077,6 +1077,157 @@ def _linux_crontab(findings):
             "crontab -l", out.strip()[:200], "用户 crontab 可被用于持久化，需确认"))
 
 
+def _linux_read_lines(path):
+    """读取文本配置文件；不存在/不可读返回 None（不阻断基线扫描）。"""
+    p = Path(path)
+    if not p.is_file():
+        return None
+    try:
+        return p.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return None
+
+
+def _linux_cis_empty_passwd(findings):
+    """CIS 1.1.5 / 5.4.x：/etc/shadow 中密码字段为空 = 无需密码即可登录。"""
+    lines = _linux_read_lines("/etc/shadow")
+    if lines is None:
+        findings.append(_sys_finding(
+            "CIS：/etc/shadow 不可读", "info", "/etc/shadow",
+            "文件不存在或当前用户无权限", "以 root 运行扫描以读取影子文件"))
+        return
+    users = []
+    for line in lines:
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("+"):
+            continue  # 服务账号（如 + ::: 占位）
+        m = re.match(r"^([^:]+):([^:]*):", line)
+        if not m:
+            continue
+        name, pwd = m.group(1), m.group(2)
+        # 密码字段为空且不是锁定（!/*）形态 = 空密码账号
+        if pwd == "":
+            users.append(name)
+    if users:
+        findings.append(_sys_finding(
+            "CIS：空密码账号 %d 个" % len(users), "high", "/etc/shadow",
+            "账号: " + "; ".join(users[:20])[:200],
+            "空密码账号可被直接登录，立即设置密码或锁定账号"))
+
+
+def _linux_cis_sudoers(findings):
+    """CIS 5.x：sudoers 中 NOPASSWD = 无密码提权（sudoers.d 一并检查）。"""
+    # 候选文件固定列：/etc/sudoers 与 /etc/sudoers.d 下全部文件。
+    # 存在性交给 _linux_read_lines（文件不存在返回 None 即跳过），
+    # 便于跨平台单测（mock _linux_read_lines）且不依赖真实目录状态。
+    paths = ["/etc/sudoers", "/etc/sudoers.d"]
+    targets = []
+    for path in paths:
+        p = Path(path)
+        if p.is_dir():
+            try:
+                targets.extend(str(x) for x in p.iterdir() if x.is_file())
+            except OSError:
+                targets.append(path)
+        else:
+            targets.append(path)
+    hits = []
+    for path in targets:
+        lines = _linux_read_lines(path)
+        if lines is None:
+            continue
+        for line in lines:
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#"):
+                continue
+            if re.search(r"(?i)NOPASSWD", stripped):
+                # !authenticate 也会以 NOPASSWD 形式出现，同样弱化认证
+                hits.append("%s: %s" % (path, stripped[:120]))
+    if hits:
+        findings.append(_sys_finding(
+            "CIS：sudo 存在 NOPASSWD 条目 %d 处" % len(hits), "medium",
+            "/etc/sudoers", "; ".join(hits[:20])[:200],
+            "NOPASSWD 允许免密提权，建议改为 requiretty + 密码认证"))
+
+
+_CIS_SYSCTL = [
+    # (key, 安全值, 描述, 级别, 建议)
+    ("fs.suid_dumpable", "0", "允许对 SUID 程序产生 core dump", "high",
+     "设为 0：sysctl -w fs.suid_dumpable=0"),
+    ("kernel.randomize_va_space", "2", "ASLR 未完全启用（应=2）", "medium",
+     "设为 2：sysctl -w kernel.randomize_va_space=2"),
+    ("net.ipv4.conf.all.accept_redirects", "0", "接受 ICMP 重定向", "medium",
+     "设为 0：sysctl -w net.ipv4.conf.all.accept_redirects=0"),
+    ("net.ipv4.conf.all.send_redirects", "0", "发送 ICMP 重定向", "low",
+     "设为 0：sysctl -w net.ipv4.conf.all.send_redirects=0"),
+    ("net.ipv4.ip_forward", "0", "主机启用了 IP 转发（路由行为）", "low",
+     "非路由器应设为 0：sysctl -w net.ipv4.ip_forward=0"),
+]
+
+
+def _linux_sysctl_values(keys):
+    """读取 sysctl 键值（只读）。返回 {key: value}；sysctl 缺失/键不存在记 NA。"""
+    code, out, err = _run(["sysctl"] + list(keys), timeout=20)
+    if code is None or code != 0:
+        return {}
+    result = {}
+    for line in out.splitlines():
+        m = re.match(r"^([^=\s]+)\s*=\s*(\S+)", line.strip())
+        if m:
+            result[m.group(1)] = m.group(2)
+    return result
+
+
+def _linux_cis_sysctl(findings):
+    """CIS 1.5 / 3.x：内核参数加固检查（fs.suid_dumpable / ASLR / ICMP 重定向等）。"""
+    keys = [t[0] for t in _CIS_SYSCTL]
+    values = _linux_sysctl_values(keys)
+    if not values:
+        findings.append(_sys_finding(
+            "CIS：sysctl 不可用", "info", "sysctl",
+            "命令缺失或执行失败，跳过内核参数检查", "安装 procps 或确认 sysctl 可用"))
+        return
+    for key, safe, desc, sev, rec in _CIS_SYSCTL:
+        val = values.get(key)
+        if val is None:
+            continue  # 键不存在，跳过
+        if val != safe:
+            findings.append(_sys_finding(
+                "CIS：%s=%s" % (key, val), sev, "sysctl " + key,
+                desc, rec))
+
+
+def _linux_cis_login_history(findings):
+    """CIS 6.2.x：登录历史检查——lastb 失败登录次数、last 异常来源提示。"""
+    code, out, err = _run(["lastb", "-n", "50"], timeout=20)
+    if code is not None and out.strip():
+        lines = [l for l in out.strip().splitlines() if l.strip()]
+        findings.append(_sys_finding(
+            "CIS：失败登录记录 %d 条" % len(lines), "medium", "lastb -n 50",
+            "最近失败登录 %d 条，含用户名与来源 IP" % len(lines),
+            "大量失败登录 = 暴力破解迹象，核查来源并考虑 fail2ban"))
+    else:
+        findings.append(_sys_finding(
+            "CIS：失败登录记录", "info", "lastb",
+            "无失败登录记录（或 lastb 不可用/无权限）", "无"))
+    code2, out2, err2 = _run(["last", "-n", "10"], timeout=20)
+    if code2 is not None and out2.strip():
+        lines = [l for l in out2.strip().splitlines() if l.strip()]
+        findings.append(_sys_finding(
+            "CIS：近期登录 %d 条" % len(lines), "low", "last -n 10",
+            "最近登录 %d 条，含用户名与来源" % len(lines),
+            "核查是否有陌生账号/陌生来源登录"))
+
+
+def _linux_cis(findings):
+    """CIS 合规基线（只读）：空密码 / sudo NOPASSWD / 内核参数 / 登录历史。"""
+    _linux_cis_empty_passwd(findings)
+    _linux_cis_sudoers(findings)
+    _linux_cis_sysctl(findings)
+    _linux_cis_login_history(findings)
+
+
 def _linux_path_hijack(findings):
     path = os.environ.get("PATH", "")
     writable = [p for p in path.split(os.pathsep)
@@ -1097,6 +1248,7 @@ def run_linux_baseline():
     _linux_open_ports(findings)
     _linux_crontab(findings)
     _linux_path_hijack(findings)
+    _linux_cis(findings)
     return findings
 
 # ── 报告输出 ────────────────────────────────────────────────────────────────

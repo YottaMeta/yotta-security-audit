@@ -1,5 +1,24 @@
 # 更新日志
 
+## v0.1.4 (2026-08-26)
+
+系统基线新增 **CIS 合规检测器**（Linux，只读，接入 run_linux_baseline 尾部）：
+
+- 空密码账号（/etc/shadow 密码字段为空 = 无需密码可登录，high）。
+- sudo NOPASSWD 免密提权条目（/etc/sudoers 与 /etc/sudoers.d，medium）。
+- 内核参数加固（sysctl 只读查询）：fs.suid_dumpable / kernel.randomize_va_space
+  （ASLR）/ net.ipv4.conf.all.accept_redirects / send_redirects / ip_forward。
+- 登录历史：lastb 失败登录（medium，暴力破解迹象）+ last 近期登录提示（low）。
+- 不可读文件 / 命令缺失统一降级为 info 提示，不阻断基线扫描。
+
+测试：新增 scripts/test_yotta_audit_cis.py（11 项，mock 只读命令，跨平台可跑）；
+py3.8 + py3.13 全量 24/24 通过；自扫 exit 0 无中高危误报（新增 2 条 LOW 为 CIS 检测代码提及 sudo 的预期提示）。
+
+
+## v0.1.3 (2026-08-26)
+
+banner 大标题加功能后缀「元安安全审计」，与 YottaMeta 技能矩阵视觉统一；无功能变更。
+
 ## v0.1.2 (2026-08-26)
 
 README 按标准补全：新增「这是什么 / 核心价值 / 核心优势 / 功能体系 / 常见问题 / 相关技能 / 升级卸载」等章节，与 YottaMeta 技能矩阵 README 标准对齐；无功能变更。
