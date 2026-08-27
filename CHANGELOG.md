@@ -1,5 +1,16 @@
 # 更新日志
 
+## v0.1.5 (2026-08-28)
+
+中英双语 README 对齐（老张拍板「英文门面 + 中文全档」）：
+
+- **README.md 改为英文**：作为 GitHub / npm / ClawHub 首页的英文门面（翻译 + 精简，覆盖定位 / 核心价值 / 13 类检测器 / 命令 / 使用示例 / 安装 / 升级卸载 / 常见问题 / 相关技能 / 边界 / 开发校验全流程）。
+- **新增 README.zh-CN.md**：原中文完整主文档整体平移，顶部加语言切换链接。
+- **移除 npx --agent codex 安装行**：README 安装方式一不再出现 `npx -y @yottameta/... --agent <name>`（固定智能体名，违反安装规范；npx 用 -g 或 --dir，--agent 仅 install.sh 用）。
+- **package.json**：description 改英文；files 加 README.zh-CN.md；版本 0.1.4 → 0.1.5。
+- 版本四处对齐：package.json / SKILL frontmatter / 引擎 VERSION / 文档。
+- 边界（B 方案）：references / CHANGELOG / 测试注释不翻译；SKILL 触发描述保持中文。
+
 ## v0.1.4 (2026-08-26)
 
 系统基线新增 **CIS 合规检测器**（Linux，只读，接入 run_linux_baseline 尾部）：

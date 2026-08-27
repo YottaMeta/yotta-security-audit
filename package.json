@@ -1,7 +1,7 @@
 {
   "name": "@yottameta/yotta-security-audit",
-  "version": "0.1.4",
-  "description": "元安 —— 检测 AI 技能恶意模式（13 类）与系统安全基线（Windows/Linux），纯只读、零依赖、有纪律。",
+  "version": "0.1.5",
+  "description": "Yuan'an (元安) — detects malicious patterns in AI skills (13 detector classes) and system security baselines (Windows/Linux); purely read-only, zero-dependency and disciplined. Triggers on security audit / skill security check / malicious detection / supply-chain security / system baseline / scan skills. Boundaries: detect & report only, masked by default, authorized targets only.",
   "license": "MIT",
   "keywords": [
     "agent-skills",
@@ -21,7 +21,8 @@
     "references",
     "scripts",
     "assets",
-    "bin"
+    "bin",
+    "README.zh-CN.md"
   ],
   "repository": {
     "type": "git",

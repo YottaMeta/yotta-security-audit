@@ -1,6 +1,6 @@
 ---
 name: yotta-security-audit
-version: 0.1.4
+version: 0.1.5
 description: 元安 —— 检测 AI 技能中的恶意模式（13 类检测器）与系统安全基线（Windows/Linux），纯只读、零依赖、有纪律。触发：用户提到 安全审计 / 技能安全检查 / 恶意检测 / 供应链安全 / 系统安全基线 / scan skills / supply chain / malicious skill / 扫描技能 等。边界：本工具只检测与报告，绝不执行修复、删除或查杀动作。
 license: MIT
 ---

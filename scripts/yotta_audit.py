@@ -53,7 +53,7 @@ _HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HERE))
 import audit_rules  # noqa: E402
 
-VERSION = "0.1.4"
+VERSION = "0.1.5"
 TOOL_NAME = "yotta-security-audit"
 
 # ── 技能目录发现（17 类智能体权威映射，与 install.js 一致）──────────────
