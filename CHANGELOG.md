@@ -1,6 +1,14 @@
 # 更新日志
 
+## v0.1.6 (2026-08-29)
+
+维护性修复（签名数据豁免）：
+
+- 签名数据文件列表加入 `verify_rules.py`（yotta-verify 规则表）：元安扫描 yotta-verify 时
+  规则表自身字面量不再误报为 critical/high（keychain / id_rsa / DPAPI 等检测模式属签名数据）。
+
 ## v0.1.5 (2026-08-28)
+
 
 中英双语 README 对齐（老张拍板「英文门面 + 中文全档」）：
 
