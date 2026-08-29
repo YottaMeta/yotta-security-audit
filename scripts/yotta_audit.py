@@ -53,7 +53,7 @@ _HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HERE))
 import audit_rules  # noqa: E402
 
-VERSION = "0.1.6"
+VERSION = "0.1.7"
 TOOL_NAME = "yotta-security-audit"
 
 # ── 技能目录发现（17 类智能体权威映射，与 install.js 一致）──────────────
@@ -91,7 +91,7 @@ TEXT_EXTENSIONS = {
 }
 MAX_FILE_SIZE = 1_000_000  # 1 MB
 # 签名数据文件：规则表是扫描器自身的签名数据库，不是被测技能行为，扫描时跳过
-SIGNATURE_DATA_FILES = {"audit_rules.py", "vetter_rules.py", "verify_rules.py"}
+SIGNATURE_DATA_FILES = {"audit_rules.py", "vetter_rules.py", "verify_rules.py", "hardening_rules.py"}
 
 # 无扩展名的点文件也纳入扫描（.env 等凭据文件常见形态）
 DOTFILE_NAMES = {

@@ -44,7 +44,7 @@ AI 技能正成为供应链攻击的新入口：一个「看起来正常」的�
 | **规则可扩展** | 规则表位于 scripts/audit_rules.py，可用 --ioc-db 传入自有威胁情报 |
 | **授权与法律边界** | 只允许审计已获授权目标；未经授权扫描他人系统违反《网络安全法》与《刑法》285/286 条 |
 | **零依赖** | Python 3.8+ 标准库，无 daemon / 无数据库；Windows + Linux 通用 |
-| **生态分发** | GitHub + npm 双源同步发布；npx / install.sh / 手动复制三种安装方式 |
+| **生态分发** | GitHub + npm 双源同步发布；npx / git clone / Download ZIP / install.sh 四种安装方式 |
 
 ## 功能体系
 
@@ -99,53 +99,42 @@ python3 scripts/yotta_audit.py --path ./some-skill --severity high
 
 ## 安装
 
-三种方式任选其一，技能文件统一从 **npm** 获取（GitHub 无代理时较慢，npm 可配国内镜像加速）。
+以下四种方式任选，顺序即推荐优先级；技能文件一律从 **npm** 获取（GitHub 无代理较慢，npm 支持镜像）。
 
-### 方式一：npm（推荐，一行安装）
-```bash
-# 国内加速（可选）：npm config set registry https://registry.npmmirror.com
-npx -y @yottameta/yotta-security-audit -g
-npx -y @yottameta/yotta-security-audit --dir <你的技能目录>   # 任意智能体：指定目录安装
+### 方式一：npm 一行装（推荐）
+
+```text
+# 可选国内加速：npm config set registry https://registry.npmmirror.com
+npx -y @yottameta/yotta-security-audit --agent <智能体名称>      # 装到指定智能体默认用户级技能目录
+npx -y @yottameta/yotta-security-audit --dir <智能体的技能目录>  # 指到技能目录本身（如 ~/.codex/skills）
 ```
-> 智能体不在预置列表里？用 `--dir` 指定它的 skills 目录，或手动复制（方式三）。`--list` 可查看各智能体对应的默认目录。想手动拿文件也可 `npm pack @yottameta/yotta-security-audit` 解包后按方式二/三安装。
 
-### 方式二：install.sh 一键安装
-```bash
-bash install.sh -g    # 用户级；bash install.sh --list 查看全部目录
-bash install.sh --agent codex   # 指定智能体（--list 可查看可用项）
-bash install.sh       # 项目级：自动检测已存在的 .claude/.cursor/.codex 等 skills 目录
-bash install.sh --dir /path/to/skills
+- `--agent <name>` 自动装到该智能体默认用户级目录；`--list` 可查看各智能体默认目录。
+- `--dir <路径>` 装到指定的技能目录；未收录的智能体用 `--dir` 指到它的技能目录。
+- npmmirror 未同步新包（404）：加 `--registry=https://registry.npmjs.org/`（国内需代理），或稍等镜像缓存。
+
+### 方式二：git clone（开发者 / 有 git 环境）
+
+```text
+git clone https://github.com/YottaMeta/yotta-security-audit.git <智能体的技能目录>/yotta-security-audit
 ```
-> 覆盖 17 类智能体，含国内 Trae / Qwen / Comate / CodeBuddy / Kimi。Windows 用户：装有 Git Bash 即可用；否则用方式三手动复制。
 
-### 方式三：手动复制
-把整个 `yotta-security-audit` 文件夹复制到目标智能体的 skills 目录。常见位置（用户级；Windows 用 `%USERPROFILE%`，Linux/macOS 用 `~`）：
+### 方式三：GitHub 下载压缩包（手动 / 无 git 环境）
 
-| 智能体 | 用户级目录 | 项目级目录 |
-|---|---|---|
-| Codex | `%USERPROFILE%\.codex\skills\yotta-security-audit\` | `.codex\skills\` |
-| Claude Code | `%USERPROFILE%\.claude\skills\yotta-security-audit\` | `.claude\skills\` |
-| Cursor | `%USERPROFILE%\.cursor\skills\yotta-security-audit\` | `.cursor\skills\` |
-| Windsurf | `%USERPROFILE%\.codeium\windsurf\skills\yotta-security-audit\` | `.windsurf\skills\` |
-| opencode | `%USERPROFILE%\.config\opencode\skills\yotta-security-audit\` | `.opencode\skills\` |
-| Gemini | `%USERPROFILE%\.gemini\skills\yotta-security-audit\` | `.gemini\skills\` |
-| Goose | `%USERPROFILE%\.config\goose\skills\yotta-security-audit\` | `.goose\skills\` |
-| Amp | `%USERPROFILE%\.config\agents\skills\yotta-security-audit\` | `.agents\skills\` |
-| Kiro | `%USERPROFILE%\.kiro\skills\yotta-security-audit\` | `.kiro\skills\` |
-| WorkBuddy | `%USERPROFILE%\.workbuddy\skills\yotta-security-audit\` | `.workbuddy\skills\` |
-| Trae Code CLI | `%USERPROFILE%\.traecli\skills\yotta-security-audit\` | `.traecli\skills\` |
-| Trae IDE（国内） | `%USERPROFILE%\.trae-cn\skills\yotta-security-audit\` | `.trae\skills\` |
-| Qwen Code | `%USERPROFILE%\.qwen\skills\yotta-security-audit\` | `.qwen\skills\` |
-| Comate | `%USERPROFILE%\.comate\skills\yotta-security-audit\` | `.comate\skills\` |
-| CodeBuddy | `%USERPROFILE%\.codebuddy\skills\yotta-security-audit\` | `.codebuddy\skills\` |
-| Kimi | `%USERPROFILE%\.kimi\skills\yotta-security-audit\` | `.kimi\skills\` |
-| 通用 AGENTS.md | `%USERPROFILE%\.agents\skills\yotta-security-audit\` | `.agents\skills\` |
+在 GitHub 仓库 `YottaMeta/yotta-security-audit` 点 **Code → Download ZIP**，解压后把 `yotta-security-audit` 文件夹放进智能体技能目录。
 
-> Codex 默认目录若设置了环境变量 `CODEX_HOME`，以该变量为准；opencode 若设置 `XDG_CONFIG_HOME` 同理。`.agents\skills` 并非通用目录，仅 OpenCode / Cursor / Cline / Amp / Kimi / Gemini CLI / GitHub Copilot 等会读取，**Claude Code 与 Codex 默认不读**。不确定时用 `--dir` 指定，或让该智能体自行安装。
+### 方式四：install.sh（多智能体一键脚本）
 
+```text
+bash install.sh --agent <name>   # 装到指定智能体默认用户级目录
+bash install.sh --dir <path>     # 装到指定目录
+bash install.sh --list           # 列出智能体 -> 默认目录
+```
+
+> 方式一走 npm 源（npmmirror / npmjs），不依赖 GitHub；方式二 / 三走 GitHub，国内无代理可能失败。
 ## 升级 / 卸载
 
-- **升级**：重新安装最新版覆盖即可——`npx -y @yottameta/yotta-security-audit -g` 或重跑 `bash install.sh -g`。技能目录内的旧文件会被覆盖；不影响项目中已有的其他文件。
+- **升级**：重新安装最新版覆盖即可——重跑你用的安装命令（如 `npx -y @yottameta/yotta-security-audit --agent <name>` 或 `bash install.sh --agent <name>`）。技能目录内旧文件会被替换；不影响项目中其他文件。
 - **卸载**：删除目标智能体 skills 目录下的 `yotta-security-audit` 文件夹（各智能体目录见上表）即可。卸载后本技能不再生效。
 
 ## 常见问题
