@@ -1,5 +1,9 @@
 # 更新日志
 
+## v0.2.1 (2026-08-30)
+
+- 措辞规范：清理「第三方」表述（改为上游 / 外部）。
+
 ## v0.2.0 (2026-08-30)
 
 安全家族检测能力增强（对齐腾讯云鼎 8 检测点 + 科恩 13 行为项）：
@@ -8,7 +12,7 @@
   Prompt 注入 / 远程脚本下载执行 / 可疑编码·混淆 / 其他）+ 科恩 13 行为项归口。
 - **新检测器（规则 54 → 61）**：路径穿越（PathTraversal）/ MCP 命令执行（MCPCommandExec）/
   MCP 任意文件读写（MCPFileAccess）。
-- **报告升级腾讯式双视角**：安全健康度评分（0-100）+ 威胁捕获模型视图（8 类逐类 verdict）+
+- **报告升级v0.2.0 腾讯式双视角**：安全健康度评分（0-100）+ 威胁捕获模型视图（8 类逐类 verdict）+
   行为项（13 项，text / JSON / Markdown）。
 - 自扫 0 中高危；测试 24 / 24 全绿。
 
@@ -70,7 +74,7 @@ README 按标准补全：新增「这是什么 / 核心价值 / 核心优势 / �
 
 ## v0.1.0 (2026-08-26)
 
-YottaMeta 自有实现首版（重写自第三方技术包 skill-security-audit v2.0.0，已完全重写，无上游代码）：
+YottaMeta 自有实现首版（重写自上游技术包 skill-security-audit v2.0.0，已完全重写，无上游代码）：
 
 - 双模式：--target skill（默认，13 类技能恶意模式检测）/ --target system（系统安全基线，平台感知）。
 - 13 类检测器全新实现：DownloadExec / Obfuscation / Persistence / Exfiltration / CredentialTheft /
