@@ -1,6 +1,6 @@
 ---
 name: yotta-security-audit
-version: 0.2.1
+version: 0.2.2
 description: 元安 —— 检测 AI 技能中的恶意模式（13 类检测器）与系统安全基线（Windows/Linux），纯只读、零依赖、有纪律。触发：用户提到 安全审计 / 技能安全检查 / 恶意检测 / 供应链安全 / 系统安全基线 / scan skills / supply chain / malicious skill / 扫描技能 等。边界：本工具只检测与报告，绝不执行修复、删除或查杀动作。
 license: MIT
 ---
@@ -12,7 +12,7 @@ YottaMeta 自有安全扫描引擎，面向 AI 技能供应链与所在系统：
 - **技能模式**（--target skill，默认）：扫描 AI 技能目录中的恶意模式，13 类检测器覆盖后门、凭据窃取、数据外传、持久化、供应链安装钩子等。
 - **系统模式**（--target system）：系统安全基线扫描，Windows / Linux 平台感知，只读不改系统。
 
-纯 Python 3.8+ 标准库实现，零外部依赖；Windows + Linux 通用。
+纯 Python 3.8+ 标准库实现，零依赖；Windows + Linux 通用。
 
 ## 何时使用
 

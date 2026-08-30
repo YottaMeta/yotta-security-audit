@@ -7,7 +7,7 @@
   system  系统安全基线扫描（Windows/Linux，平台感知，只读）
 
 设计原则：
-- 纯 Python 3.8+ 标准库，零外部依赖；Windows/Linux 通用。
+- 纯 Python 3.8+ 标准库，零依赖；Windows/Linux 通用。
 - 只读检测：绝不做修复、删除、杀毒等变更动作。
 - 报告默认脱敏：不打印私钥、环境变量值、完整凭据，只给路径+模式+建议。
 - 检测器可自扫（dogfooding）：扫描自身不产生中高危误报。
@@ -53,7 +53,7 @@ _HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HERE))
 import audit_rules  # noqa: E402
 
-VERSION = "0.2.1"
+VERSION = "0.2.2"
 TOOL_NAME = "yotta-security-audit"
 
 # ── 技能目录发现（17 类智能体权威映射，与 install.js 一致）──────────────
@@ -1253,7 +1253,7 @@ def run_linux_baseline():
 
 # ── 报告输出 ────────────────────────────────────────────────────────────────
 
-# 威胁捕获模型视图（2026-08-30 增强：腾讯云鼎 8 检测点 + 科恩 13 行为项）
+# 威胁捕获模型视图（2026-08-30 增强：8 检测点 + 13 行为项）
 _SEV_WEIGHT = {"critical": 40, "high": 20, "medium": 8, "low": 1, "info": 0}
 _SEV_CAPS = {"critical": 2, "high": 4, "medium": 6, "low": 10, "info": 0}
 
@@ -1270,7 +1270,7 @@ def _health_score(findings):
 
 
 def _taxonomy_view(findings):
-    """云鼎式 8 类威胁图谱：每类 verdict（danger/suspicious/safe/n/a）。"""
+    """8 类威胁图谱：每类 verdict（danger/suspicious/safe/n/a）。"""
     hits = {}
     for f in findings:
         key = audit_rules.DETECTOR_TO_TAXONOMY.get(f.detector, "other")
@@ -1296,7 +1296,7 @@ def _taxonomy_view(findings):
 
 
 def _behavior_view(findings):
-    """科恩式 13 行为项：observed / none。"""
+    """13 行为项：observed / none。"""
     observed = {}
     for f in findings:
         for b in audit_rules.DETECTOR_TO_BEHAVIORS.get(f.detector, ()):
@@ -1330,12 +1330,12 @@ def format_text_report(findings, scope, use_color=True):
         counts["low"], counts["info"]))
     lines.append("安全健康度评分: %d/100" % _health_score(findings))
     lines.append("")
-    lines.append("威胁捕获模型（8 类，云鼎式）：")
+    lines.append("威胁捕获模型（8 类）：")
     for v in _taxonomy_view(findings):
         lines.append("  %-16s %-11s %d" % (v["name"], v["verdict"], v["count"]))
     lines.append("")
     observed = [b["behavior"] for b in _behavior_view(findings) if b["observed"]]
-    lines.append("行为项（13 项，科恩式）：%s" % (
+    lines.append("行为项（13 项）：%s" % (
         "、".join(observed) if observed else "未观察到明显系统行为"))
     lines.append("")
     if not findings:
@@ -1409,14 +1409,14 @@ def write_markdown_report(path, findings, scope):
     lines.append("")
     lines.append("**安全健康度评分：%d/100**" % _health_score(findings))
     lines.append("")
-    lines.append("## 威胁捕获模型视图（云鼎式 8 类）")
+    lines.append("## 威胁捕获模型视图（8 类）")
     lines.append("")
     lines.append("| 检测点 | verdict | 命中 |")
     lines.append("|---|---|---|")
     for v in _taxonomy_view(findings):
         lines.append("| %s | %s | %d |" % (v["name"], v["verdict"], v["count"]))
     lines.append("")
-    lines.append("## 行为项（科恩式 13 项）")
+    lines.append("## 行为项（13 项）")
     lines.append("")
     observed = [b["behavior"] for b in _behavior_view(findings) if b["observed"]]
     lines.append("观察到：%s" % ("、".join(observed) if observed else "未观察到明显系统行为"))

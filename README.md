@@ -28,7 +28,7 @@ It is not tied to any single platform: an agent-agnostic toolkit that works in a
 ## Core value
 
 - **Dual-mode coverage** — skill mode (default) scans AI skill directories; system mode scans system security baselines (Windows / Linux platform-aware).
-- **Threat capture model (v0.2.0)** — aligned with Tencent Cloudding 8 checkpoints (supply chain / command execution / network & exfil / file & sensitive path / prompt injection / remote download-exec / obfuscation / other) + Keen 13 behavior items; Tencent-style dual-view report with health score (0-100).
+- **Threat capture model** — 8 checkpoints (supply chain / command execution / network & exfil / file & sensitive path / prompt injection / remote download-exec / obfuscation / other) + 13 behavior items; dual-view report with health score (0-100).
 - **13 detector classes** — covering backdoors, credential theft, data exfiltration, persistence, supply-chain install hooks, hidden characters, high-entropy payloads and other high-risk patterns.
 - **Read-only & disciplined** — every check is a read operation; system mode also only runs read-only commands and never performs remediation, deletion or quarantine.
 - **Masked by default** — reports do not output private-key contents, environment variable values or full credentials; only paths, patterns and suggestions.
@@ -169,4 +169,4 @@ See [CHANGELOG.md](./CHANGELOG.md).
 
 ## License
 
-[MIT](./LICENSE) © YottaMeta. "Yuan'an" / "yotta-security-audit" and the YottaMeta family names (yotta-* prefix) are YottaMeta brand identifiers; derived works must not reuse them, see [NOTICE](./NOTICE). The detection direction is inspired by SlowMist's public ClawHub malicious-skill threat-intel reporting; the implementation is YottaMeta's own.
+[MIT](./LICENSE) © YottaMeta. "Yuan'an" / "yotta-security-audit" and the YottaMeta family names (yotta-* prefix) are YottaMeta brand identifiers; derived works must not reuse them, see [NOTICE](./NOTICE). The implementation is YottaMeta's own.

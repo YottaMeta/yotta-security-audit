@@ -109,7 +109,7 @@ class AuditCliTest(unittest.TestCase):
         self.assertIn("health_score", th)
         self.assertTrue(0 <= th["health_score"] <= 100)
         self.assertEqual(len(th["taxonomy"]), 8, "8 类威胁捕获模型")
-        self.assertEqual(len(th["behaviors"]), 13, "科恩 13 行为项")
+        self.assertEqual(len(th["behaviors"]), 13, "13 行为项")
         verdicts = [v["verdict"] for v in th["taxonomy"]]
         self.assertIn("danger", verdicts, "恶意样例应含 danger")
 
