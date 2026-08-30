@@ -99,6 +99,20 @@ class AuditCliTest(unittest.TestCase):
         self.assertNotIn("[MEDIUM]", r.stdout)
         self.assertIn("[CRITICAL]", r.stdout)
 
+    def test_threat_report(self):
+        r = run_cli(["--path", str(FIX / "evil-skill"),
+                     "--ioc-db", str(FIX / "custom-ioc.json"), "--json"])
+        self.assertEqual(r.returncode, 3)
+        data = json.loads(r.stdout)
+        self.assertIn("threat", data)
+        th = data["threat"]
+        self.assertIn("health_score", th)
+        self.assertTrue(0 <= th["health_score"] <= 100)
+        self.assertEqual(len(th["taxonomy"]), 8, "8 类威胁捕获模型")
+        self.assertEqual(len(th["behaviors"]), 13, "科恩 13 行为项")
+        verdicts = [v["verdict"] for v in th["taxonomy"]]
+        self.assertIn("danger", verdicts, "恶意样例应含 danger")
+
     def test_empty_dir_exit0(self):
         with tempfile.TemporaryDirectory() as td:
             r = run_cli(["--path", td, "--no-color"])

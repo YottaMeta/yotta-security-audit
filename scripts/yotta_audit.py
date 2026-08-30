@@ -53,7 +53,7 @@ _HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HERE))
 import audit_rules  # noqa: E402
 
-VERSION = "0.1.7"
+VERSION = "0.2.0"
 TOOL_NAME = "yotta-security-audit"
 
 # ── 技能目录发现（17 类智能体权威映射，与 install.js 一致）──────────────
@@ -1253,6 +1253,58 @@ def run_linux_baseline():
 
 # ── 报告输出 ────────────────────────────────────────────────────────────────
 
+# 威胁捕获模型视图（2026-08-30 增强：腾讯云鼎 8 检测点 + 科恩 13 行为项）
+_SEV_WEIGHT = {"critical": 40, "high": 20, "medium": 8, "low": 1, "info": 0}
+_SEV_CAPS = {"critical": 2, "high": 4, "medium": 6, "low": 10, "info": 0}
+
+
+def _health_score(findings):
+    """安全健康度评分 0-100（100 起扣 + 封顶；低危密集不扣光）。"""
+    counts = {}
+    for f in findings:
+        counts[f.severity] = counts.get(f.severity, 0) + 1
+    score = 100
+    for sev, w in _SEV_WEIGHT.items():
+        score -= w * min(counts.get(sev, 0), _SEV_CAPS[sev])
+    return max(0, int(round(score)))
+
+
+def _taxonomy_view(findings):
+    """云鼎式 8 类威胁图谱：每类 verdict（danger/suspicious/safe/n/a）。"""
+    hits = {}
+    for f in findings:
+        key = audit_rules.DETECTOR_TO_TAXONOMY.get(f.detector, "other")
+        hits.setdefault(key, []).append(f)
+    out = []
+    for key in audit_rules.TAXONOMY_ORDER:
+        items = hits.get(key, [])
+        name = audit_rules.THREAT_TAXONOMY.get(key, key)
+        sev = "info"
+        for f in items:
+            if _SEV_WEIGHT.get(f.severity, 0) > _SEV_WEIGHT.get(sev, 0):
+                sev = f.severity
+        if not items:
+            verdict = "n/a"
+        elif sev in ("critical", "high"):
+            verdict = "danger"
+        elif sev == "medium":
+            verdict = "suspicious"
+        else:
+            verdict = "safe"
+        out.append({"name": name, "verdict": verdict, "count": len(items)})
+    return out
+
+
+def _behavior_view(findings):
+    """科恩式 13 行为项：observed / none。"""
+    observed = {}
+    for f in findings:
+        for b in audit_rules.DETECTOR_TO_BEHAVIORS.get(f.detector, ()):
+            observed[b] = observed.get(b, 0) + 1
+    return [{"behavior": b, "observed": observed.get(b, 0)}
+            for b in audit_rules.BEHAVIORS]
+
+
 def _sev_label(sev):
     return "[%s]" % sev.upper()
 
@@ -1276,6 +1328,15 @@ def format_text_report(findings, scope, use_color=True):
     lines.append("汇总: CRITICAL %d | HIGH %d | MEDIUM %d | LOW %d | INFO %d" % (
         counts["critical"], counts["high"], counts["medium"],
         counts["low"], counts["info"]))
+    lines.append("安全健康度评分: %d/100" % _health_score(findings))
+    lines.append("")
+    lines.append("威胁捕获模型（8 类，云鼎式）：")
+    for v in _taxonomy_view(findings):
+        lines.append("  %-16s %-11s %d" % (v["name"], v["verdict"], v["count"]))
+    lines.append("")
+    observed = [b["behavior"] for b in _behavior_view(findings) if b["observed"]]
+    lines.append("行为项（13 项，科恩式）：%s" % (
+        "、".join(observed) if observed else "未观察到明显系统行为"))
     lines.append("")
     if not findings:
         lines.append("未发现安全问题。")
@@ -1311,6 +1372,11 @@ def build_json_report(findings, scope):
         "scope": {k: v for k, v in scope.items() if k not in ("target", "platform", "scanned_at")},
         "summary": _summary_counts(findings),
         "findings": [f.to_dict() for f in findings],
+        "threat": {
+            "health_score": _health_score(findings),
+            "taxonomy": _taxonomy_view(findings),
+            "behaviors": _behavior_view(findings),
+        },
     }
 
 
@@ -1340,6 +1406,20 @@ def write_markdown_report(path, findings, scope):
     lines.append("|---|---|")
     for sev in ("critical", "high", "medium", "low", "info"):
         lines.append("| %s | %d |" % (sev.upper(), c[sev]))
+    lines.append("")
+    lines.append("**安全健康度评分：%d/100**" % _health_score(findings))
+    lines.append("")
+    lines.append("## 威胁捕获模型视图（云鼎式 8 类）")
+    lines.append("")
+    lines.append("| 检测点 | verdict | 命中 |")
+    lines.append("|---|---|---|")
+    for v in _taxonomy_view(findings):
+        lines.append("| %s | %s | %d |" % (v["name"], v["verdict"], v["count"]))
+    lines.append("")
+    lines.append("## 行为项（科恩式 13 项）")
+    lines.append("")
+    observed = [b["behavior"] for b in _behavior_view(findings) if b["observed"]]
+    lines.append("观察到：%s" % ("、".join(observed) if observed else "未观察到明显系统行为"))
     lines.append("")
     if findings:
         lines.append("## 发现")

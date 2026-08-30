@@ -204,6 +204,32 @@ PATTERN_RULES = [
     Rule("SOC-002", "SocialEngineering", "medium",
          r"(?i)(?:metamask|wallet|private\s+key\s+backup|助记词|钱包)",
          "加密货币钱包相关命名", 55),
+    # ── PathTraversal 路径穿越（2026-08-30 增强：文件操作与敏感路径访问）────
+    Rule("PTV-001", "PathTraversal", "high",
+         r"(?i)(?:open|read|write|unlink|remove|rename|shutil\.copy|Path|path\.join|os\.path\.join)\s*\([^)]*\.\.(?:/|\\)",
+         "文件操作路径含父目录逃逸段，可能越权访问任意路径", 85),
+    Rule("PTV-002", "PathTraversal", "high",
+         r"(?i)(?:join|resolve|abspath|realpath)\s*\([^)]*\.\.(?:/|\\)",
+         "路径 join/解析未归一化父目录段，存在穿越风险", 80),
+
+    # ── MCPCommandExec MCP 工具面命令执行（2026-08-30 增强：命令执行风险）──
+    Rule("MCE-001", "MCPCommandExec", "critical",
+         r"(?i)(?:child_process\.)?(?:spawn|exec|execFile|fork)\s*\(\s*(?:params|tool_params|arguments|args|argv|input|command|user_input|req\.params|query|model)",
+         "MCP/工具参数流入子进程执行（spawn/exec/fork）", 92),
+    Rule("MCE-002", "MCPCommandExec", "critical",
+         r"(?i)(?:spawnSync|execSync)\s*\(\s*(?:params\.get|params\[|arguments\[|req\.params|user_input)",
+         "MCP 工具参数对象直接流入同步子进程执行（spawnSync/execSync）", 95),
+    Rule("MCE-003", "MCPCommandExec", "critical",
+         r"(?i)(?:subprocess\.)?(?:Popen|call|run)\s*\([^)]*shell\s*=\s*True[^)]*(?:params|args|argv|input|command|user_input|cmd)",
+         "subprocess 以 shell=True 执行外部输入", 92),
+
+    # ── MCPFileAccess MCP 工具面任意文件读写（2026-08-30 增强：文件操作）───
+    Rule("MFA-001", "MCPFileAccess", "high",
+         r"(?i)(?:fs\.)?(?:writeFile|writeFileSync|appendFile|createWriteStream)\s*\(\s*(?:params\.get|params\[|arguments\[|req\.params|user_input)",
+         "MCP 工具参数对象直接流入文件写操作（任意路径写入风险）", 88),
+    Rule("MFA-002", "MCPFileAccess", "high",
+         r"(?i)(?:fs\.)?(?:readFile|readFileSync|createReadStream)\s*\(\s*(?:params\.get|params\[|arguments\[|req\.params|user_input)",
+         "MCP 工具参数对象直接流入文件读操作（任意路径读取风险）", 88),
 ]
 
 # 敏感文件名（文件名级匹配，CredentialTheft 辅助）
@@ -217,6 +243,69 @@ SENSITIVE_FILENAMES = [
     ("history", "shell 历史文件", "medium", 60),
     (".env", "环境变量文件", "medium", 45),
 ]
+
+# ══════════════════════════════════════════════════════════════════════════
+# 威胁捕获模型（2026-08-30 增强：腾讯云鼎官方 8 检测点 + 科恩 13 行为项口径）
+# ══════════════════════════════════════════════════════════════════════════
+# 官方 8 检测点（腾讯云鼎威胁行为图谱，2026-08-30）
+THREAT_TAXONOMY = {
+    "supply_chain": "供应链风险",
+    "command_execution": "命令执行风险",
+    "network_exfil": "网络请求与数据外传",
+    "file_access": "文件操作与敏感路径访问",
+    "prompt_injection": "Prompt 注入风险",
+    "remote_download": "远程脚本下载执行",
+    "obfuscation": "可疑编码/混淆",
+    "other": "其他安全风险",
+}
+TAXONOMY_ORDER = ("supply_chain", "command_execution", "network_exfil", "file_access",
+                  "prompt_injection", "remote_download", "obfuscation", "other")
+
+# detector → 官方 8 检测点
+DETECTOR_TO_TAXONOMY = {
+    "DownloadExec": "remote_download",
+    "Obfuscation": "obfuscation",
+    "Persistence": "other",
+    "Exfiltration": "network_exfil",
+    "CredentialTheft": "file_access",
+    "NetworkCall": "network_exfil",
+    "PrivilegeEscalation": "other",
+    "SocialEngineering": "other",
+    "PromptInjection": "prompt_injection",
+    "PathTraversal": "file_access",
+    "MCPCommandExec": "command_execution",
+    "MCPFileAccess": "file_access",
+    "Structure": "other",
+    "Permission": "other",
+    "MCPToolSurface": "command_execution",
+}
+
+# 科恩 13 行为项（腾讯科恩实验室口径，2026-08-30）
+BEHAVIORS = (
+    "安装依赖包", "收集系统信息", "收集用户信息", "创建定时任务", "DNS 查询", "写入文件",
+    "HTTP 请求", "读取环境变量", "收集网络配置信息", "写入配置文件", "调用外部 API",
+    "读取文件", "修改 AI 配置",
+)
+
+# detector → 科恩行为项（一/多个；攻击模式类如注入/混淆不映射具体行为）
+DETECTOR_TO_BEHAVIORS = {
+    "DownloadExec": ("安装依赖包", "HTTP 请求"),
+    "Obfuscation": (),
+    "Persistence": ("创建定时任务", "写入配置文件"),
+    "Exfiltration": ("HTTP 请求", "调用外部 API"),
+    "CredentialTheft": ("读取文件", "收集用户信息"),
+    "NetworkCall": ("DNS 查询", "HTTP 请求", "调用外部 API"),
+    "PrivilegeEscalation": ("修改 AI 配置",),
+    "SocialEngineering": (),
+    "PromptInjection": (),
+    "PathTraversal": ("读取文件", "写入文件"),
+    "MCPCommandExec": (),
+    "MCPFileAccess": ("读取文件", "写入文件"),
+    "Structure": (),
+    "Permission": (),
+    "MCPToolSurface": (),
+}
+
 
 # 外传敏感文件组合（EXF 规则之外的补充，按文件名 + 行内网络调用）
 # 安装钩子可疑关键字（yotta_audit.py PostInstallHookDetector 使用；本文件为签名数据，自扫豁免）

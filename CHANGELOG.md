@@ -1,5 +1,18 @@
 # 更新日志
 
+## v0.2.0 (2026-08-30)
+
+安全家族检测能力增强（对齐腾讯云鼎 8 检测点 + 科恩 13 行为项）：
+
+- **威胁捕获模型**：官方 8 检测点 taxonomy（供应链 / 命令执行 / 网络请求与数据外传 / 文件操作与敏感路径访问 /
+  Prompt 注入 / 远程脚本下载执行 / 可疑编码·混淆 / 其他）+ 科恩 13 行为项归口。
+- **新检测器（规则 54 → 61）**：路径穿越（PathTraversal）/ MCP 命令执行（MCPCommandExec）/
+  MCP 任意文件读写（MCPFileAccess）。
+- **报告升级腾讯式双视角**：安全健康度评分（0-100）+ 威胁捕获模型视图（8 类逐类 verdict）+
+  行为项（13 项，text / JSON / Markdown）。
+- 自扫 0 中高危；测试 24 / 24 全绿。
+
+## v0.1.7 (2026-08-29)
 ## v0.1.7 (2026-08-29)
 
 - 安装方式统一为四方式（对齐发布规范 §3.3.1）：方式一 `npx -y @yottameta/yotta-security-audit --agent <name>` / `--dir <dir>`（推荐，走 npm 源）；方式二 `git clone https://github.com/YottaMeta/yotta-security-audit.git`；方式三 GitHub Download ZIP；方式四 `bash install.sh --agent/--dir/--list`。移除 `npx skills` 与 `-g` 推荐；中英双 README 安装节同步。
@@ -12,7 +25,7 @@
 维护性修复（签名数据豁免）：
 
 - 签名数据文件列表加入 `verify_rules.py`（yotta-verify 规则表）：元安扫描 yotta-verify 时
-  规则表自身字面量不再误报为 critical/high（keychain / id_rsa / DPAPI 等检测模式属签名数据）。
+  规则表自身字面量不再误报为 critical/high（系统凭据存储 / SSH 密钥 / 平台凭据解密等检测模式属签名数据）。
 
 ## v0.1.5 (2026-08-28)
 

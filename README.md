@@ -28,6 +28,7 @@ It is not tied to any single platform: an agent-agnostic toolkit that works in a
 ## Core value
 
 - **Dual-mode coverage** — skill mode (default) scans AI skill directories; system mode scans system security baselines (Windows / Linux platform-aware).
+- **Threat capture model (v0.2.0)** — aligned with Tencent Cloudding 8 checkpoints (supply chain / command execution / network & exfil / file & sensitive path / prompt injection / remote download-exec / obfuscation / other) + Keen 13 behavior items; Tencent-style dual-view report with health score (0-100).
 - **13 detector classes** — covering backdoors, credential theft, data exfiltration, persistence, supply-chain install hooks, hidden characters, high-entropy payloads and other high-risk patterns.
 - **Read-only & disciplined** — every check is a read operation; system mode also only runs read-only commands and never performs remediation, deletion or quarantine.
 - **Masked by default** — reports do not output private-key contents, environment variable values or full credentials; only paths, patterns and suggestions.
@@ -64,7 +65,7 @@ It is not tied to any single platform: an agent-agnostic toolkit that works in a
 | Obfuscation | Dynamic eval, encoded string construction, base64-decoded execution | high |
 | Persistence | Scheduled tasks, startup agents/daemons, shell config, registry startup writes | high |
 | Exfiltration | Read sensitive files then exfiltrate / archive and upload | high |
-| CredentialTheft | SSH/cloud credentials, browser data, keychain access | critical |
+| CredentialTheft | SSH/cloud credentials, browser data, system credential-store access | critical |
 | NetworkCall | Reverse connections, raw sockets, HTTP clients (mostly context-dependent) | medium |
 | PrivilegeEscalation | Permission-bit changes, setuid, joining admin groups | high |
 | SocialEngineering | Social-engineering wording in names (file names) | medium |
