@@ -23,7 +23,9 @@
     "assets",
     "bin",
     "README.zh-CN.md",
-    "!scripts/test_*.py"
+    "!scripts/test_*.py",
+    "!**/__pycache__",
+    "!**/*.pyc"
   ],
   "repository": {
     "type": "git",
