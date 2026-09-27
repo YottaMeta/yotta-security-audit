@@ -93,7 +93,7 @@ Education mode reviews where student data lives and how risky the storage is: wh
 | EDU-HR-001..003 | Cloud-sync / messenger folders, file names carrying a name, AI-tool & temp directories | high / high / medium |
 
 - Supported inputs: CSV / TSV / TXT / MD / JSON / XML / HTML / YAML, plus xlsx and docx (standard-library read-only parsing). PDF, images, legacy Office files and archives are counted as skipped, never OCR'd.
-- Masking is fixed and repeatable: ID / student numbers and phones keep the last 4 digits, names keep the surname, addresses stop at city level, emails keep the first character and domain.
+- Masking is fixed and repeatable: ID / student numbers and phones keep the last 4 digits, names keep the surname, addresses keep the first 3 characters, emails keep the first character and domain.
 - The tool never infers age or identity, never links records across files, never goes online and never caches raw text. Only `--path` is scanned; there is no auto-discovery and no "scan the whole disk" mode.
 - Rule packs are read-only JSON: replace or extend them with `--edu-rules ./school-rules.json`. Details: `references/student-data-scan.md`.
 

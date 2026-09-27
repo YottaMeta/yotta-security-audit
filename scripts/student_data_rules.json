@@ -76,7 +76,7 @@
       "severity": "high",
       "field": "address",
       "value_kind": "any",
-      "remediation": "评估是否必须保留到门牌级；对外分发前只保留到市级"
+      "remediation": "评估是否必须保留到门牌级；对外分发前只保留必要粒度（如市级）"
     },
     {
       "id": "EDU-QI-004",
