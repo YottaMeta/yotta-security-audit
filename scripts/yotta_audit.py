@@ -27,6 +27,7 @@ exit code 语义（三技能统一）：
 """
 import argparse
 import base64
+import csv
 import hashlib
 import json
 import math
@@ -35,8 +36,10 @@ import re
 import subprocess
 import sys
 import tempfile
+import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
+from xml.etree import ElementTree as ET
 
 try:
     sys.stdout.reconfigure(encoding="utf-8")
@@ -53,7 +56,7 @@ _HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HERE))
 import audit_rules  # noqa: E402
 
-VERSION = "0.2.4"
+VERSION = "0.3.0"
 TOOL_NAME = "yotta-security-audit"
 
 # ── 技能目录发现（17 类智能体权威映射，与 install.js 一致）──────────────
@@ -91,7 +94,10 @@ TEXT_EXTENSIONS = {
 }
 MAX_FILE_SIZE = 1_000_000  # 1 MB
 # 签名数据文件：规则表是扫描器自身的签名数据库，不是被测技能行为，扫描时跳过
-SIGNATURE_DATA_FILES = {"audit_rules.py", "vetter_rules.py", "verify_rules.py", "hardening_rules.py"}
+SIGNATURE_DATA_FILES = {
+    "audit_rules.py", "vetter_rules.py", "verify_rules.py", "hardening_rules.py",
+    "student_data_rules.json",
+}
 
 # 无扩展名的点文件也纳入扫描（.env 等凭据文件常见形态）
 DOTFILE_NAMES = {
@@ -122,10 +128,10 @@ def redact(text):
 
 class Finding:
     __slots__ = ("detector", "severity", "category", "file_path", "line",
-                 "description", "confidence", "rule_id", "detail")
+                 "description", "confidence", "rule_id", "detail", "extra")
 
     def __init__(self, detector, severity, category, file_path, line=0,
-                 description="", confidence=50, rule_id="", detail=""):
+                 description="", confidence=50, rule_id="", detail="", extra=None):
         self.detector = detector
         self.severity = severity
         self.category = category
@@ -135,9 +141,10 @@ class Finding:
         self.confidence = confidence
         self.rule_id = rule_id
         self.detail = detail
+        self.extra = extra
 
     def to_dict(self):
-        return {
+        data = {
             "detector": self.detector,
             "severity": self.severity,
             "category": self.category,
@@ -147,6 +154,9 @@ class Finding:
             "confidence": self.confidence,
             "rule_id": self.rule_id,
         }
+        if self.extra:
+            data["extra"] = self.extra
+        return data
 
 
 # ── IOC 数据库 ────────────────────────────────────────────────────────────
@@ -631,6 +641,838 @@ class FilenameDetector:
                     detail=redact(base)[:120],
                 ))
         return findings
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# 教育版（--target edu）：学生数据隐私风险扫描
+# ══════════════════════════════════════════════════════════════════════════
+# 设计口径（docs/元安-教育版S1设计-2026-09-27.md）：
+# - 只读、零网络、不执行被扫描内容；显式 --path，不做自动发现；
+# - 报告一律不回显原文（不提供 --show-raw），只给脱敏样例、位置与计数；
+# - 规则包是只读 JSON 数据，不执行表达式；级别是风险提示分级，不是法律定性。
+
+EDU_MAX_FILE_SIZE = 4 * 1024 * 1024   # 单文件 4 MB
+EDU_MAX_FILES = 2000
+EDU_MAX_ROWS = 5000                   # 单表最多解析行数
+EDU_TEXT_EXTENSIONS = {
+    ".csv", ".tsv", ".txt", ".md", ".markdown", ".json", ".jsonl",
+    ".xml", ".html", ".htm", ".yaml", ".yml",
+}
+EDU_CONTAINER_EXTENSIONS = {".xlsx", ".docx"}
+EDU_BINARY_NOTICE_EXTENSIONS = {
+    ".pdf", ".doc", ".xls", ".ppt", ".pptx", ".png", ".jpg", ".jpeg", ".gif",
+    ".bmp", ".webp", ".tif", ".tiff", ".zip", ".rar", ".7z", ".gz", ".db",
+    ".sqlite", ".mp3", ".mp4", ".mov",
+}
+
+EDU_CATEGORY_NAMES = {
+    "direct_identifier": "直接标识符",
+    "quasi_identifier": "准标识符与组合",
+    "sensitive_attribute": "敏感属性",
+    "handling_risk": "存放与流转风险",
+}
+EDU_CATEGORY_ORDER = ("direct_identifier", "quasi_identifier",
+                      "sensitive_attribute", "handling_risk")
+EDU_RULE_SEVERITIES = ("low", "medium", "high", "critical")
+EDU_CONTENT_KINDS = ("id_card", "phone", "email", "keyword_any")
+EDU_VALUE_KINDS = ("any", "alnum", "phone")
+EDU_PATH_MATCH_KINDS = ("substring", "segment")
+EDU_DISCLAIMER = (
+    "本报告只做基于规则的隐私风险提示，不回显原文，不构成法律意见或合规结论；"
+    "条款级判断请使用元规 yotta-compliance，处置动作由用户决定。"
+)
+EDU_UNPARSED_NOTE = "未解析格式（PDF / 图片 / 旧版 Office / 压缩包等）请先转为文本或导出 CSV"
+
+
+class RulePackError(Exception):
+    """规则包缺失、不可读或结构不合法。"""
+
+
+_ID_CARD_WEIGHTS = (7, 9, 10, 5, 8, 4, 2, 1, 6, 3, 7, 9, 10, 5, 8, 4, 2)
+_ID_CARD_CHECK = "10X98765432"
+_ID_CARD_RE = re.compile(r"(?<![0-9A-Za-z])[1-9]\d{16}[0-9Xx](?![0-9A-Za-z])")
+_PHONE_RE = re.compile(r"(?<!\d)1[3-9]\d{9}(?!\d)")
+_EMAIL_RE = re.compile(
+    r"[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9-]{1,63}(?:\.[A-Za-z0-9-]{1,63}){0,4}\.[A-Za-z]{2,24}")
+_ALNUM_RE = re.compile(r"^[0-9A-Za-z][0-9A-Za-z-]{7,24}$")
+_XLSX_SHEET_RE = re.compile(r"^xl/worksheets/sheet\d+\.xml$")
+_EDU_DIGIT_RUN_RE = re.compile(r"\d{8,}")
+
+
+def edu_id_card_valid(value):
+    """18 位身份证号 + GB 11643 校验位（MOD 11-2）。"""
+    if len(value) != 18:
+        return False
+    body = value[:17]
+    if not body.isdigit():
+        return False
+    total = sum(int(body[i]) * _ID_CARD_WEIGHTS[i] for i in range(17))
+    return value[17].upper() == _ID_CARD_CHECK[total % 11]
+
+
+# ── 脱敏（固定规则、可复算；报告永不回显原文）───────────────────────────
+
+def _mask_keep_tail(value, keep=4):
+    text = str(value)
+    if len(text) <= keep:
+        return "*" * len(text)
+    return "*" * (len(text) - keep) + text[-keep:]
+
+
+def edu_mask_id_card(value):
+    return _mask_keep_tail(value, 4)
+
+
+def edu_mask_phone(value):
+    return _mask_keep_tail(value, 4)
+
+
+def edu_mask_email(value):
+    text = str(value)
+    if "@" not in text:
+        return "***"
+    local, domain = text.split("@", 1)
+    return (local[:1] or "*") + "***@" + domain
+
+
+def edu_mask_name(value):
+    text = str(value)
+    return (text[:1] + "*") if len(text) >= 2 else "*"
+
+
+def edu_mask_address(value):
+    text = str(value)
+    return (text[:3] + "**") if len(text) > 5 else "***"
+
+
+def edu_mask_generic(value):
+    text = str(value)
+    return (text[:1] + "***") if text else "***"
+
+
+def edu_mask_score(value):
+    return "**"
+
+
+def edu_mask_birth(value):
+    m = re.match(r"^(\d{4})", str(value).strip())
+    return (m.group(1) + "-**-**") if m else "****"
+
+
+def edu_mask_student_no(value):
+    text = str(value).strip()
+    if len(text) < 6:
+        return "***"
+    return text[:2] + "***" + text[-2:]
+
+
+_EDU_FIELD_MASKERS = {
+    "student_name": edu_mask_name,
+    "id_card": edu_mask_id_card,
+    "student_no": edu_mask_student_no,
+    "phone": edu_mask_phone,
+    "address": edu_mask_address,
+    "birth": edu_mask_birth,
+    "guardian": edu_mask_phone,
+    "score": edu_mask_score,
+    "health": edu_mask_generic,
+    "welfare": edu_mask_generic,
+    "biometric": edu_mask_generic,
+}
+
+
+# ── 规则包加载与校验 ───────────────────────────────────────────────────────
+
+def _edu_default_rules_path():
+    return _HERE / "student_data_rules.json"
+
+
+def load_edu_rule_pack(path=None):
+    """加载并校验教育版规则包；失败抛 RulePackError（fail-closed）。"""
+    p = Path(path) if path else _edu_default_rules_path()
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        raise RulePackError("规则包不存在: %s" % p)
+    except (OSError, ValueError) as e:
+        raise RulePackError("规则包读取或解析失败（%s）：%s" % (p, e))
+    validate_edu_rule_pack(data, source=str(p))
+    return data
+
+
+def validate_edu_rule_pack(data, source="<memory>"):
+    def fail(msg):
+        raise RulePackError("规则包不合法（%s）：%s" % (source, msg))
+
+    if not isinstance(data, dict):
+        fail("顶层必须是 JSON 对象")
+    if data.get("schema_version") != "1.0":
+        fail("schema_version 必须为 1.0")
+    vocab = data.get("field_vocab")
+    if not isinstance(vocab, dict) or not vocab:
+        fail("field_vocab 必须是非空对象")
+    for key, terms in vocab.items():
+        if not isinstance(terms, list) or not terms:
+            fail("field_vocab.%s 必须是非空字符串数组" % key)
+        if not all(isinstance(t, str) and t.strip() for t in terms):
+            fail("field_vocab.%s 含空项或非字符串" % key)
+
+    seen_ids = set()
+
+    def check_common(rule, section):
+        if not isinstance(rule, dict):
+            fail("%s 的规则必须是对象" % section)
+        rule_id = rule.get("id")
+        if not isinstance(rule_id, str) or not rule_id.strip():
+            fail("%s 存在缺少 id 的规则" % section)
+        if rule_id in seen_ids:
+            fail("rule_id 重复: %s" % rule_id)
+        seen_ids.add(rule_id)
+        if not isinstance(rule.get("title"), str) or not rule["title"].strip():
+            fail("%s 规则 %s 缺少 title" % (section, rule_id))
+        if rule.get("category") not in EDU_CATEGORY_NAMES:
+            fail("%s 规则 %s 的 category 非法" % (section, rule_id))
+        if rule.get("severity") not in EDU_RULE_SEVERITIES:
+            fail("%s 规则 %s 的 severity 非法" % (section, rule_id))
+        if not isinstance(rule.get("remediation", ""), str):
+            fail("%s 规则 %s 的 remediation 必须是字符串" % (section, rule_id))
+
+    def check_list(section):
+        items = data.get(section)
+        if not isinstance(items, list):
+            fail("%s 必须是数组" % section)
+        return items
+
+    for rule in check_list("content_rules"):
+        check_common(rule, "content_rules")
+        if rule.get("kind") not in EDU_CONTENT_KINDS:
+            fail("content_rules 规则 %s 的 kind 非法" % rule.get("id"))
+        if rule["kind"] == "keyword_any":
+            kws = rule.get("keywords")
+            if not isinstance(kws, list) or not kws:
+                fail("content_rules 规则 %s 缺少 keywords" % rule.get("id"))
+
+    for rule in check_list("field_rules"):
+        check_common(rule, "field_rules")
+        if rule.get("field") not in vocab:
+            fail("field_rules 规则 %s 引用了未定义词表" % rule.get("id"))
+        if rule.get("value_kind", "any") not in EDU_VALUE_KINDS:
+            fail("field_rules 规则 %s 的 value_kind 非法" % rule.get("id"))
+
+    for rule in check_list("combo_rules"):
+        check_common(rule, "combo_rules")
+        fields = rule.get("fields")
+        if not isinstance(fields, list) or len(fields) < 2:
+            fail("combo_rules 规则 %s 的 fields 至少两项" % rule.get("id"))
+        if not all(f in vocab for f in fields):
+            fail("combo_rules 规则 %s 引用了未定义词表" % rule.get("id"))
+
+    for rule in check_list("path_rules"):
+        check_common(rule, "path_rules")
+        if rule.get("match") not in EDU_PATH_MATCH_KINDS:
+            fail("path_rules 规则 %s 的 match 非法" % rule.get("id"))
+        patterns = rule.get("patterns")
+        if not isinstance(patterns, list) or not patterns:
+            fail("path_rules 规则 %s 缺少 patterns" % rule.get("id"))
+
+    for rule in check_list("filename_rules"):
+        check_common(rule, "filename_rules")
+        for key in ("keywords", "surnames"):
+            items = rule.get(key)
+            if not isinstance(items, list) or not items:
+                fail("filename_rules 规则 %s 缺少 %s" % (rule.get("id"), key))
+
+    return True
+
+
+# ── 文件收集与解析（只读）─────────────────────────────────────────────────
+
+def _edu_is_binary(path):
+    try:
+        with open(path, "rb") as fh:
+            return _is_binary(fh.read(8192))
+    except OSError:
+        return True
+
+
+def collect_edu_files(root):
+    """收集教育版可扫描文件；返回 (files, skipped_ext)。"""
+    files = []
+    skipped = {}
+    count = 0
+    root = Path(root)
+
+    def skip(ext):
+        key = ext or "(无扩展名)"
+        skipped[key] = skipped.get(key, 0) + 1
+
+    if root.is_file():
+        ext = root.suffix.lower()
+        if ext in EDU_TEXT_EXTENSIONS or ext in EDU_CONTAINER_EXTENSIONS:
+            files.append(root)
+        else:
+            skip(ext)
+        return files, skipped
+
+    for dirpath, dirnames, filenames in os.walk(str(root)):
+        dirnames[:] = sorted(d for d in dirnames if d not in SKIP_DIRS)
+        for fname in sorted(filenames):
+            if count >= EDU_MAX_FILES:
+                skipped["(超出文件数上限)"] = skipped.get("(超出文件数上限)", 0) + 1
+                continue
+            p = Path(dirpath) / fname
+            ext = p.suffix.lower()
+            if ext not in EDU_TEXT_EXTENSIONS and ext not in EDU_CONTAINER_EXTENSIONS:
+                skip(ext)
+                continue
+            try:
+                if p.stat().st_size > EDU_MAX_FILE_SIZE:
+                    skip(ext)
+                    continue
+            except OSError:
+                skip(ext)
+                continue
+            if ext in EDU_TEXT_EXTENSIONS and _edu_is_binary(p):
+                skip(ext)
+                continue
+            files.append(p)
+            count += 1
+    return files, skipped
+
+
+def _edu_read_text(path):
+    """UTF-8（含 BOM）→ GBK → 替换兜底，绝不崩。"""
+    try:
+        raw = Path(path).read_bytes()
+    except OSError as e:
+        raise RulePackError("文件不可读: %s" % e)
+    for enc in ("utf-8-sig", "gbk"):
+        try:
+            return raw.decode(enc)
+        except UnicodeDecodeError:
+            continue
+    return raw.decode("utf-8", errors="replace")
+
+
+def _edu_parse_delimited(text, ext):
+    lines = text.splitlines()
+    first = next((l for l in lines if l.strip()), "")
+    if ext == ".tsv":
+        delim = "\t"
+    else:
+        delim = "," if first.count(",") >= first.count("\t") else "\t"
+    rows = []
+    for i, row in enumerate(csv.reader(lines, delimiter=delim)):
+        if i >= EDU_MAX_ROWS:
+            break
+        rows.append([str(c).strip() for c in row])
+    return rows
+
+
+def _edu_col_index(letters):
+    idx = 0
+    for ch in letters.upper():
+        idx = idx * 26 + (ord(ch) - ord("A") + 1)
+    return idx - 1
+
+
+def _edu_xml_text(elem):
+    return "".join(t.text or "" for t in elem.iter() if t.tag.endswith("}t"))
+
+
+def _edu_parse_xlsx(path):
+    """标准库读取 xlsx 文本（共享字符串 / 内联字符串）；返回表格列表。"""
+    with zipfile.ZipFile(str(path)) as z:
+        names = set(z.namelist())
+        shared = []
+        if "xl/sharedStrings.xml" in names:
+            root = ET.fromstring(z.read("xl/sharedStrings.xml"))
+            for si in root:
+                shared.append(_edu_xml_text(si))
+        tables = []
+        for name in sorted(n for n in names if _XLSX_SHEET_RE.match(n)):
+            sheet = ET.fromstring(z.read(name))
+            rows = []
+            for row in sheet.iter():
+                if not row.tag.endswith("}row"):
+                    continue
+                if len(rows) >= EDU_MAX_ROWS:
+                    break
+                cells = {}
+                fallback = 0
+                for cell in row:
+                    if not cell.tag.endswith("}c"):
+                        continue
+                    ref = cell.get("r") or ""
+                    m = re.match(r"^([A-Za-z]+)", ref)
+                    idx = _edu_col_index(m.group(1)) if m else fallback
+                    fallback = idx + 1
+                    ctype = (cell.get("t") or "").lower()
+                    value = ""
+                    for child in cell:
+                        if child.tag.endswith("}v"):
+                            value = child.text or ""
+                        elif child.tag.endswith("}is"):
+                            value = _edu_xml_text(child)
+                    if ctype == "s":
+                        try:
+                            value = shared[int(value)]
+                        except (ValueError, IndexError, TypeError):
+                            value = ""
+                    cells[idx] = str(value).strip()
+                width = (max(cells) + 1) if cells else 0
+                rows.append([cells.get(i, "") for i in range(width)])
+            tables.append(rows)
+    return tables
+
+
+def _edu_parse_docx(path):
+    """标准库读取 docx 正文段落文本；返回行列表。"""
+    with zipfile.ZipFile(str(path)) as z:
+        if "word/document.xml" not in z.namelist():
+            raise RulePackError("docx 缺少 word/document.xml: %s" % path)
+        root = ET.fromstring(z.read("word/document.xml"))
+    lines = []
+    for para in root.iter():
+        if not para.tag.endswith("}p"):
+            continue
+        text = _edu_xml_text(para).strip()
+        if text:
+            lines.append(text)
+        if len(lines) >= EDU_MAX_ROWS:
+            break
+    return lines
+
+
+# ── 匹配与聚合 ─────────────────────────────────────────────────────────────
+
+def _edu_match_content(rule, text):
+    """返回 (命中数, 脱敏样例列表)。"""
+    kind = rule["kind"]
+    if kind == "id_card":
+        samples = [edu_mask_id_card(m.group()) for m in _ID_CARD_RE.finditer(text)
+                   if edu_id_card_valid(m.group())]
+        return len(samples), samples
+    if kind == "phone":
+        samples = [edu_mask_phone(m.group()) for m in _PHONE_RE.finditer(text)]
+        return len(samples), samples
+    if kind == "email":
+        samples = [edu_mask_email(m.group()) for m in _EMAIL_RE.finditer(text)]
+        return len(samples), samples
+    count = 0
+    samples = []
+    for kw in rule.get("keywords", []):
+        n = text.count(kw)
+        if n:
+            count += n
+            if not samples:
+                samples.append(kw)  # 类别词本身不是个人数据，可原样提示
+    return count, samples
+
+
+def _edu_find_column(header, terms):
+    for idx, cell in enumerate(header):
+        compact = re.sub(r"\s+", "", str(cell))
+        if not compact:
+            continue
+        for term in terms:
+            if term in compact:
+                return idx
+    return None
+
+
+def _edu_path_rule_hit(rule, rel_path):
+    text = rel_path.replace("\\", "/")
+    lowered = text.lower()
+    segments = [s.lower() for s in text.split("/") if s]
+    for pattern in rule.get("patterns", []):
+        p = str(pattern)
+        if rule.get("match") == "segment":
+            if p.lower() in segments:
+                return True
+        elif p.lower() in lowered:
+            return True
+    return False
+
+
+def _edu_filename_rule_hit(rule, name):
+    """返回 (原始姓名或编号, 脱敏后文件名)；未命中返回 (None, None)。"""
+    stem = Path(name).stem
+    if not any(k in stem for k in rule.get("keywords", [])):
+        return None, None
+    token = None
+    for surname in rule.get("surnames", []):
+        start = 0
+        while True:
+            idx = stem.find(surname, start)
+            if idx < 0:
+                break
+            tail = stem[idx + len(surname): idx + len(surname) + 2]
+            given = "".join(ch for ch in tail if "\u4e00" <= ch <= "\u9fff")
+            if given:
+                token = surname + given
+                break
+            start = idx + 1
+        if token:
+            break
+    if not token:
+        m = _EDU_DIGIT_RUN_RE.search(stem)
+        if not m:
+            return None, None
+        token = m.group()
+    masked = name.replace(token, edu_mask_generic(token))
+    return token, masked
+
+
+def _edu_confidence(severity):
+    return {"critical": 80, "high": 72, "medium": 60, "low": 45}.get(severity, 50)
+
+
+def run_edu_scan(root, pack):
+    """执行教育版扫描；返回 (findings, scope)。只读、零网络、不回显原文。"""
+    root = Path(root)
+    is_dir = root.is_dir()
+    files, skipped = collect_edu_files(root)
+    aggregated = {}
+    records = 0
+    parsed = 0
+
+    def emit(rule, rel, key_suffix, line, location, count, sample=""):
+        key = (rule["id"], rel, key_suffix)
+        item = aggregated.get(key)
+        if item is None:
+            aggregated[key] = {
+                "rule": rule, "rel": rel, "line": line, "location": location,
+                "count": count, "sample": sample,
+            }
+        else:
+            item["count"] += count
+            if not item["sample"] and sample:
+                item["sample"] = sample
+
+    content_rules = pack.get("content_rules", [])
+    field_rules = pack.get("field_rules", [])
+    combo_rules = pack.get("combo_rules", [])
+    path_rules = pack.get("path_rules", [])
+    filename_rules = pack.get("filename_rules", [])
+    vocab = pack.get("field_vocab", {})
+
+    for p in files:
+        try:
+            rel = os.path.relpath(str(p), str(root)) if is_dir else p.name
+        except ValueError:
+            rel = p.name
+        rel = rel.replace("\\", "/")
+        ext = p.suffix.lower()
+        file_hit_count = 0
+        display_rel = rel
+        filename_hits = []
+        for rule in filename_rules:
+            token, masked_name = _edu_filename_rule_hit(rule, p.name)
+            if not token:
+                continue
+            # 文件名里的姓名/编号同样属于待脱敏内容：本文件所有条目的路径都改用脱敏名
+            display_rel = rel.replace(token, edu_mask_generic(token))
+            filename_hits.append((rule, masked_name, token))
+        try:
+            if ext == ".xlsx":
+                tables = _edu_parse_xlsx(p)
+            elif ext == ".docx":
+                tables = [None]
+                lines = _edu_parse_docx(p)
+            else:
+                text = _edu_read_text(p)
+                if ext in (".csv", ".tsv"):
+                    tables = [_edu_parse_delimited(text, ext)]
+                else:
+                    tables = [None]
+                    lines = text.splitlines()
+        except (RulePackError, OSError, ValueError, zipfile.BadZipFile, ET.ParseError):
+            skipped[ext] = skipped.get(ext, 0) + 1
+            continue
+        parsed += 1
+
+        for table in tables:
+            table_findings = 0
+            if table is None:
+                records += len(lines)
+                for rule in content_rules:
+                    count = 0
+                    sample = ""
+                    first_line = 0
+                    for lineno, raw in enumerate(lines, 1):
+                        hits, samples = _edu_match_content(rule, raw)
+                        if not hits:
+                            continue
+                        if not first_line:
+                            first_line = lineno
+                        count += hits
+                        if not sample and samples:
+                            sample = samples[0]
+                    if count:
+                        emit(rule, display_rel, "line", first_line,
+                             "第 %d 行（同文件共 %d 处）" % (first_line, count),
+                             count, sample)
+                        table_findings += 1
+            else:
+                header_idx = None
+                for i, row in enumerate(table):
+                    if any(str(c).strip() for c in row):
+                        header_idx = i
+                        break
+                if header_idx is None:
+                    continue
+                header = [str(c).strip() for c in table[header_idx]]
+                data_rows = table[header_idx + 1:]
+                records += len(data_rows)
+
+                for rule in field_rules:
+                    col = _edu_find_column(header, vocab.get(rule["field"], []))
+                    if col is None:
+                        continue
+                    values = [str(r[col]).strip() for r in data_rows if col < len(r)]
+                    values = [v for v in values if v]
+                    if not values:
+                        continue
+                    value_kind = rule.get("value_kind", "any")
+                    if value_kind == "alnum":
+                        values = [v for v in values if _ALNUM_RE.match(v)]
+                    elif value_kind == "phone":
+                        values = [v for v in values if _PHONE_RE.search(v)]
+                    if not values:
+                        continue
+                    masker = _EDU_FIELD_MASKERS.get(rule["field"], edu_mask_generic)
+                    emit(rule, display_rel, "col:%d" % col, header_idx + 1,
+                         "列「%s」" % header[col], len(values), masker(values[0]))
+                    table_findings += 1
+
+                for rule in combo_rules:
+                    cols = [_edu_find_column(header, vocab.get(f, []))
+                            for f in rule.get("fields", [])]
+                    if any(c is None for c in cols) or not data_rows:
+                        continue
+                    first_row = data_rows[0]
+                    parts = []
+                    for field, col in zip(rule["fields"], cols):
+                        value = str(first_row[col]) if col < len(first_row) else ""
+                        masker = _EDU_FIELD_MASKERS.get(field, edu_mask_generic)
+                        parts.append(masker(value))
+                    emit(rule, display_rel, "combo", header_idx + 1,
+                         "列「%s」" % "」「".join(header[c] for c in cols),
+                         len(data_rows), " / ".join(parts))
+                    table_findings += 1
+
+                for rule in content_rules:
+                    for col in range(len(header)):
+                        count = 0
+                        sample = ""
+                        hits, samples = _edu_match_content(rule, header[col])
+                        count += hits
+                        if samples:
+                            sample = samples[0]
+                        for row in data_rows:
+                            value = str(row[col]).strip() if col < len(row) else ""
+                            if not value:
+                                continue
+                            hits, samples = _edu_match_content(rule, value)
+                            if not hits:
+                                continue
+                            count += hits
+                            if not sample and samples:
+                                sample = samples[0]
+                        if count:
+                            emit(rule, display_rel, "col:%d" % col, header_idx + 1,
+                                 "列「%s」" % header[col], count, sample)
+                            table_findings += 1
+            file_hit_count += table_findings
+
+        for rule, masked_name, token in filename_hits:
+            emit(rule, masked_name, "filename", 0,
+                 "文件名（已部分脱敏）", 1, edu_mask_name(token))
+            file_hit_count += 1
+
+        if file_hit_count:
+            abs_path = str(p)
+            for rule in path_rules:
+                if not _edu_path_rule_hit(rule, abs_path):
+                    continue
+                if rule.get("require_content_hit", True) and not file_hit_count:
+                    continue
+                emit(rule, display_rel, "path", 0, "所在路径命中规则", 1, "")
+
+    findings = []
+    for item in aggregated.values():
+        rule = item["rule"]
+        detail = item["location"]
+        if item["sample"]:
+            detail += " · 样例 %s" % item["sample"]
+        findings.append(Finding(
+            detector="StudentData",
+            severity=rule["severity"],
+            category=rule["category"],
+            file_path=item["rel"],
+            line=item["line"],
+            description=rule["title"] + "（需人工复核）",
+            confidence=_edu_confidence(rule["severity"]),
+            rule_id=rule["id"],
+            detail=detail,
+            extra={
+                "masked_sample": item["sample"],
+                "count": item["count"],
+                "location": item["location"],
+                "remediation": rule.get("remediation", ""),
+            },
+        ))
+    order = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
+    findings.sort(key=lambda f: (order.get(f.severity, 9), f.file_path, f.rule_id))
+    scope = {
+        "target": "edu",
+        "platform": "auto",
+        "path": str(root.resolve()),
+        "files_scanned": parsed,
+        "files_skipped": sum(skipped.values()),
+        "skipped_ext": skipped,
+        "records_scanned": records,
+        "rules": {
+            "schema_version": pack.get("schema_version"),
+            "pack_version": pack.get("pack_version"),
+            "rule_count": sum(len(pack.get(k, [])) for k in (
+                "content_rules", "field_rules", "combo_rules", "path_rules", "filename_rules")),
+        },
+    }
+    return findings, scope
+
+
+def edu_category_view(findings):
+    """4 类风险类别视图：命中数 + 最高级别 verdict。"""
+    hits = {}
+    for f in findings:
+        hits.setdefault(f.category, []).append(f)
+    out = []
+    for key in EDU_CATEGORY_ORDER:
+        items = hits.get(key, [])
+        sev = "info"
+        for f in items:
+            if audit_rules.severity_rank(f.severity) > audit_rules.severity_rank(sev):
+                sev = f.severity
+        if not items:
+            verdict = "n/a"
+        elif sev in ("critical", "high"):
+            verdict = "danger"
+        elif sev == "medium":
+            verdict = "suspicious"
+        else:
+            verdict = "safe"
+        out.append({"key": key, "name": EDU_CATEGORY_NAMES.get(key, key),
+                    "verdict": verdict, "count": len(items)})
+    return out
+
+
+def _edu_scope_lines(scope):
+    lines = []
+    lines.append("目标: edu（学生数据隐私）  路径: %s" % scope.get("path", ""))
+    lines.append("时间: %s" % scope.get("scanned_at", ""))
+    rules = scope.get("rules") or {}
+    lines.append("范围: 解析文件 %d 个 / 跳过 %d 个 / 记录 %d 条（规则包 %s）" % (
+        scope.get("files_scanned", 0), scope.get("files_skipped", 0),
+        scope.get("records_scanned", 0), rules.get("pack_version", "-")))
+    skipped = scope.get("skipped_ext") or {}
+    if skipped:
+        items = ", ".join("%s ×%d" % (k, v) for k, v in sorted(skipped.items()))
+        lines.append("未解析/跳过: %s" % items)
+    return lines
+
+
+def format_edu_text_report(findings, scope, use_color=False):
+    lines = []
+    lines.append("=" * 70)
+    lines.append("%s %s 学生数据隐私风险扫描报告" % (TOOL_NAME, VERSION))
+    lines.append("=" * 70)
+    lines.extend(_edu_scope_lines(scope))
+    lines.append("")
+    counts = _summary_counts(findings)
+    lines.append("汇总: CRITICAL %d | HIGH %d | MEDIUM %d | LOW %d | INFO %d" % (
+        counts["critical"], counts["high"], counts["medium"],
+        counts["low"], counts["info"]))
+    lines.append("风险类别（4 类）：")
+    for v in edu_category_view(findings):
+        lines.append("  %-16s %-11s %d" % (v["name"], v["verdict"], v["count"]))
+    lines.append("")
+    if not findings:
+        lines.append("未发现学生数据隐私风险。")
+    order = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
+    for f in sorted(findings, key=lambda x: (order.get(x.severity, 9), x.file_path, x.rule_id)):
+        extra = f.extra or {}
+        lines.append("%s %s (%s)" % (_sev_label(f.severity), f.description, f.rule_id))
+        lines.append("  位置: %s · %s" % (f.file_path, extra.get("location", "")))
+        sample = extra.get("masked_sample") or ""
+        lines.append("  样例: %s   命中: %d 处" % (sample or "-", extra.get("count", 1)))
+        if extra.get("remediation"):
+            lines.append("  建议: %s" % extra["remediation"])
+        lines.append("")
+    lines.append("说明: %s" % EDU_DISCLAIMER)
+    lines.append("=" * 70)
+    return "\n".join(lines)
+
+
+def _edu_markdown_lines(findings, scope):
+    lines = ["# %s 学生数据隐私风险扫描报告" % TOOL_NAME, ""]
+    for line in _edu_scope_lines(scope):
+        lines.append("- %s" % line)
+    lines.append("")
+    counts = _summary_counts(findings)
+    lines.append("## 汇总")
+    lines.append("")
+    lines.append("| 级别 | 数量 |")
+    lines.append("|---|---|")
+    for sev in ("critical", "high", "medium", "low", "info"):
+        lines.append("| %s | %d |" % (sev.upper(), counts[sev]))
+    lines.append("")
+    lines.append("## 风险类别")
+    lines.append("")
+    lines.append("| 类别 | verdict | 命中 |")
+    lines.append("|---|---|---|")
+    for v in edu_category_view(findings):
+        lines.append("| %s | %s | %d |" % (v["name"], v["verdict"], v["count"]))
+    lines.append("")
+    lines.append("## 发现")
+    lines.append("")
+    if not findings:
+        lines.append("未发现学生数据隐私风险。")
+        lines.append("")
+    order = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
+    for f in sorted(findings, key=lambda x: (order.get(x.severity, 9), x.file_path, x.rule_id)):
+        extra = f.extra or {}
+        lines.append("### %s · %s" % (f.severity.upper(), f.description))
+        lines.append("")
+        lines.append("- 规则: %s" % f.rule_id)
+        lines.append("- 位置: %s · %s" % (f.file_path, extra.get("location", "")))
+        lines.append("- 样例: %s（命中 %d 处）" % (
+            extra.get("masked_sample") or "-", extra.get("count", 1)))
+        if extra.get("remediation"):
+            lines.append("- 建议: %s" % extra["remediation"])
+        lines.append("")
+    lines.append("## 说明")
+    lines.append("")
+    lines.append(EDU_DISCLAIMER)
+    lines.append("")
+    return lines
+
+
+def edu_report_conflicts(report_path, root):
+    """报告不得写入被扫描目录内，也不得与输入文件相同（防自污染）。"""
+    try:
+        rp = Path(report_path).resolve()
+        target = Path(root).resolve()
+    except OSError:
+        return False
+    if target.is_file():
+        return rp == target
+    try:
+        rp.relative_to(target)
+        return True
+    except ValueError:
+        return False
 
 
 # ── 扫描编排 ────────────────────────────────────────────────────────────────
@@ -1363,7 +2205,7 @@ def format_text_report(findings, scope, use_color=True):
 
 
 def build_json_report(findings, scope):
-    return {
+    data = {
         "tool": TOOL_NAME,
         "version": VERSION,
         "target": scope.get("target", "skill"),
@@ -1372,12 +2214,19 @@ def build_json_report(findings, scope):
         "scope": {k: v for k, v in scope.items() if k not in ("target", "platform", "scanned_at")},
         "summary": _summary_counts(findings),
         "findings": [f.to_dict() for f in findings],
-        "threat": {
+    }
+    if scope.get("target") == "edu":
+        data["edu"] = {
+            "categories": edu_category_view(findings),
+            "note": EDU_DISCLAIMER,
+        }
+    else:
+        data["threat"] = {
             "health_score": _health_score(findings),
             "taxonomy": _taxonomy_view(findings),
             "behaviors": _behavior_view(findings),
-        },
-    }
+        }
+    return data
 
 
 def _summary_counts(findings):
@@ -1387,7 +2236,7 @@ def _summary_counts(findings):
     return counts
 
 
-def write_markdown_report(path, findings, scope):
+def _skill_markdown_lines(findings, scope):
     lines = []
     lines.append("# %s 安全扫描报告" % TOOL_NAME)
     lines.append("")
@@ -1436,6 +2285,15 @@ def write_markdown_report(path, findings, scope):
             lines.append("")
     else:
         lines.append("未发现安全问题。")
+    return lines
+
+
+def write_markdown_report(path, findings, scope):
+    """写 Markdown 报告：edu 模式用教育版模板，其余保持原模板。"""
+    if scope.get("target") == "edu":
+        lines = _edu_markdown_lines(findings, scope)
+    else:
+        lines = _skill_markdown_lines(findings, scope)
     try:
         with open(str(path), "w", encoding="utf-8", newline="\n") as fh:
             fh.write("\n".join(lines))
@@ -1458,12 +2316,15 @@ class _AuditParser(argparse.ArgumentParser):
 def parse_args(argv=None):
     ap = _AuditParser(
         prog=TOOL_NAME,
-        description="YottaMeta 元安 —— 技能恶意模式 + 系统安全基线扫描（只读）",
+        description="YottaMeta 元安 —— 技能恶意模式 / 系统安全基线 / 学生数据隐私风险扫描（只读）",
     )
-    ap.add_argument("--target", choices=["skill", "system"], default="skill",
-                    help="扫描目标：skill（默认，技能恶意模式）/ system（系统安全基线）")
+    ap.add_argument("--target", choices=["skill", "system", "edu"], default="skill",
+                    help="扫描目标：skill（默认，技能恶意模式）/ system（系统安全基线）/ "
+                         "edu（学生数据隐私风险，必须显式 --path）")
     ap.add_argument("--path", "-p", metavar="PATH",
-                    help="扫描单个目录（技能模式：视为一个技能；系统模式忽略）")
+                    help="扫描单个目录或文件（技能模式：视为一个技能；edu 模式：必填；系统模式忽略）")
+    ap.add_argument("--edu-rules", metavar="FILE",
+                    help="edu 模式自定义规则包 JSON（默认 scripts/student_data_rules.json）")
     ap.add_argument("--platform", choices=["auto", "windows", "linux"], default="auto",
                     help="系统扫描平台（默认 auto=当前系统）")
     ap.add_argument("--json", action="store_true", help="输出 JSON")
@@ -1492,6 +2353,31 @@ def main(argv=None):
         findings = run_windows_baseline() if platform == "windows" else run_linux_baseline()
         scope = {"target": "system", "platform": platform, "scanned_at": scanned_at}
         return _emit(args, findings, scope)
+
+    if args.target == "edu":
+        if not args.path:
+            print("[ERROR] edu 模式必须显式指定 --path（不做自动发现，避免扫描无关或他人目录）",
+                  file=sys.stderr)
+            return 4
+        root = Path(args.path)
+        if not root.exists():
+            print("[ERROR] 路径不存在: %s" % args.path, file=sys.stderr)
+            return 4
+        try:
+            pack = load_edu_rule_pack(args.edu_rules)
+        except RulePackError as e:
+            print("[ERROR] %s" % e, file=sys.stderr)
+            return 4
+        if args.report and edu_report_conflicts(args.report, root):
+            print("[ERROR] 报告输出路径不得位于被扫描目录内，也不得与输入文件相同",
+                  file=sys.stderr)
+            return 4
+        findings, scope = run_edu_scan(root, pack)
+        scope["scanned_at"] = scanned_at
+        min_rank = audit_rules.severity_rank(args.severity) if args.severity else 0
+        filtered = [f for f in findings
+                    if audit_rules.severity_rank(f.severity) >= min_rank]
+        return _emit(args, filtered, scope)
 
     # skill 模式
     ioc_db = IOCDatabase(args.ioc_db)
@@ -1540,6 +2426,8 @@ def _emit(args, findings, scope):
         write_markdown_report(args.report, findings, scope)
     if args.json:
         print(json.dumps(build_json_report(findings, scope), indent=2, ensure_ascii=False))
+    elif scope.get("target") == "edu":
+        print(format_edu_text_report(findings, scope))
     else:
         use_color = not args.no_color and sys.stdout.isatty()
         print(format_text_report(findings, scope, use_color=use_color))

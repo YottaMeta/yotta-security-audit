@@ -6,8 +6,8 @@
 
 <h1 align="center">yotta-security-audit · 元安 (Yuan'an)</h1>
 
-<p align="center">YottaMeta's AI-skill supply-chain & system security scan engine: <b>detects malicious skill patterns · scans system security baselines</b>, purely read-only, zero-dependency and disciplined. Use it before installing a new skill, for periodic audits of installed skills, or to check system security baselines — wherever correctness and safety matter.</p>
-<p align="center">Activates when the user mentions security audit / skill security check / malicious detection / supply-chain security / system security baseline / scan skills / supply chain / malicious skill, or asks to scan a skill; running it before installing any new skill is recommended — <b>judged by the target, not keyword luck</b>.</p>
+<p align="center">YottaMeta's AI-skill supply-chain & system security scan engine: <b>detects malicious skill patterns · scans system security baselines · audits student-data privacy risks</b>, purely read-only, zero-dependency and disciplined. Use it before installing a new skill, for periodic audits of installed skills, to check system security baselines, or to review a school data folder before sharing it.</p>
+<p align="center">Activates when the user mentions security audit / skill security check / malicious detection / supply-chain security / system security baseline / student data / student privacy / school data compliance / scan skills / malicious skill, or asks to scan a skill or a class data folder.</p>
 <p align="center">Python 3.8+ standard library, zero external dependencies; Windows + Linux; read-only detection, reports masked by default, with authorization & legal boundaries declared.</p>
 
 <p align="center">
@@ -27,11 +27,12 @@ It is not tied to any single platform: an agent-agnostic toolkit that works in a
 
 ## Core value
 
-- **Dual-mode coverage** — skill mode (default) scans AI skill directories; system mode scans system security baselines (Windows / Linux platform-aware).
+- **Three-mode coverage** — skill mode (default) scans AI skill directories; system mode scans system security baselines (Windows / Linux platform-aware); education mode audits student-data privacy risks in folders, spreadsheets and documents.
 - **Threat capture model** — 8 checkpoints (supply chain / command execution / network & exfil / file & sensitive path / prompt injection / remote download-exec / obfuscation / other) + 13 behavior items; dual-view report with health score (0-100).
 - **13 detector classes** — covering backdoors, credential theft, data exfiltration, persistence, supply-chain install hooks, hidden characters, high-entropy payloads and other high-risk patterns.
 - **Read-only & disciplined** — every check is a read operation; system mode also only runs read-only commands and never performs remediation, deletion or quarantine.
 - **Masked by default** — reports do not output private-key contents, environment variable values or full credentials; only paths, patterns and suggestions.
+- **Never echoes raw student data** — education mode reports only the rule class, location, hit count and a masked sample; there is no raw-value display option.
 - **Auto-discover skill directories** — scanning all installed skills auto-discovers 17 agent skill directories.
 - **Self-scan without false positives** — the scanner can scan itself without medium/high false positives (signature data files are auto-exempted).
 
@@ -53,6 +54,7 @@ It is not tied to any single platform: an agent-agnostic toolkit that works in a
 |---|---|
 | Skill mode (--target skill) | Scan AI skill directories with 13 detector classes; auto-discovers 17 agent skill directories |
 | System mode (--target system) | System security baseline scan (startup entries, scheduled tasks, services, firewall, shares, permission points, etc.) |
+| Education mode (--target edu) | Student-data privacy scan for folders / CSV / xlsx / docx; `--path` is required, reports are always masked |
 | Single directory (--path) | Scan a skill directory before installing it |
 | Report output | text + structured --json + --report Markdown report |
 | Severity filter (--severity) | Report only high and above |
@@ -77,6 +79,24 @@ It is not tied to any single platform: an agent-agnostic toolkit that works in a
 
 > The rule table lives in scripts/audit_rules.py (signature data file, self-scan exempt); --ioc-db accepts your own threat-intel feeds.
 
+## Education mode (--target edu)
+
+Education mode reviews where student data lives and how risky the storage is: which files hold which kinds of personal information and whether they sit in paths that leave the machine.
+
+| Rule | Focus | Default level |
+|---|---|---|
+| EDU-ID-001 | ID card numbers (18 digits + checksum) | critical |
+| EDU-ID-002 / EDU-ID-003 | Mobile numbers / email addresses | high / medium |
+| EDU-ID-004 | Student-number fields (header-driven) | medium |
+| EDU-QI-001..004 | Name + score, birth date, home address, guardian contact | high |
+| EDU-SA-001..004 | Health & wellbeing, financial-hardship status, biometric data, explicit minor markers | critical |
+| EDU-HR-001..003 | Cloud-sync / messenger folders, file names carrying a name, AI-tool & temp directories | high / high / medium |
+
+- Supported inputs: CSV / TSV / TXT / MD / JSON / XML / HTML / YAML, plus xlsx and docx (standard-library read-only parsing). PDF, images, legacy Office files and archives are counted as skipped, never OCR'd.
+- Masking is fixed and repeatable: ID / student numbers and phones keep the last 4 digits, names keep the surname, addresses stop at city level, emails keep the first character and domain.
+- The tool never infers age or identity, never links records across files, never goes online and never caches raw text. Only `--path` is scanned; there is no auto-discovery and no "scan the whole disk" mode.
+- Rule packs are read-only JSON: replace or extend them with `--edu-rules ./school-rules.json`. Details: `references/student-data-scan.md`.
+
 ## Usage examples
 
 ```bash
@@ -94,6 +114,12 @@ python3 scripts/yotta_audit.py --path ./some-skill --json --report report.md
 
 # Report only high and above
 python3 scripts/yotta_audit.py --path ./some-skill --severity high
+
+# Education mode: review a class data folder
+python3 scripts/yotta_audit.py --target edu --path ./class-folder
+
+# Education mode: one spreadsheet, JSON + Markdown report (the report must stay outside the scanned folder)
+python3 scripts/yotta_audit.py --target edu --path ./scores.xlsx --json --report ./edu-report.md
 ```
 
 **Exit codes**: **0** = clean / low only; **1** = medium; **2** = high; **3** = critical; **4** = scanner error.
