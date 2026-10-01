@@ -1,6 +1,6 @@
 {
   "name": "@yottameta/yotta-security-audit",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Yuan'an (元安) — detects malicious patterns in AI skills (13 detector classes), scans system security baselines (Windows/Linux) and audits student-data privacy risks in education folders (15 rules); purely read-only, zero-dependency and disciplined. Triggers on security audit / skill security check / malicious detection / supply-chain security / system baseline / student data / privacy scan. Boundaries: detect & report only, never echoes raw values, authorized targets only.",
   "license": "MIT",
   "keywords": [
