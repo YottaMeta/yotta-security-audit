@@ -9,6 +9,7 @@
 """
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -20,6 +21,8 @@ HERE = Path(__file__).resolve().parent
 SCRIPT = HERE / "yotta_audit.py"
 FIX = HERE.parent.parent.parent / ".tmp" / "audit-fixtures"
 KEEP = "--keep" in sys.argv
+sys.path.insert(0, str(HERE))
+import audit_rules as ar  # noqa: E402
 
 EVIL_DETECTORS = {
     "DownloadExec", "IOCMatchDetector", "PostInstallHookDetector", "Base64Detector",
@@ -181,6 +184,21 @@ class AuditCliTest(unittest.TestCase):
             capture_output=True, env=env, timeout=60)
         self.assertEqual(r.returncode, 0, r.stdout.decode("gbk", errors="replace") + r.stderr.decode("gbk", errors="replace"))
         self.assertNotIn(b"UnicodeEncodeError", r.stderr)
+
+
+class Pri001RegexTest(unittest.TestCase):
+    def test_regular_modes_do_not_match(self):
+        rule = next(r for r in ar.PATTERN_RULES if r.id == "PRI-001")
+        for sample in ("chmod " + "600 x", "chmod " + "644 x", "chmod " + "700 x",
+                       "chmod " + "755 x", "chmod " + "777 x"):
+            self.assertIsNone(re.search(rule.pattern, sample), sample)
+
+    def test_special_bits_match(self):
+        rule = next(r for r in ar.PATTERN_RULES if r.id == "PRI-001")
+        for sample in ("chmod " + "4755 x", "chmod " + "2755 x", "chmod " + "1777 x",
+                       "chmod " + "6755 x", "chmod " + "+s x", "chmod " + "u+s x",
+                       "chmod " + "+t x"):
+            self.assertIsNotNone(re.search(rule.pattern, sample), sample)
 
 
 if __name__ == "__main__":

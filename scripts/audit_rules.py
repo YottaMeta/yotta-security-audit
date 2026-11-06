@@ -182,7 +182,7 @@ PATTERN_RULES = [
 
     # ── PrivilegeEscalation 权限提升 ──────────────────────────────────────
     Rule("PRI-001", "PrivilegeEscalation", "high",
-         r"(?i)\bchmod\s+[0-7]*[267][0-7]{2}\b",
+         r"(?i)\bchmod\s+(?:[ugoa]*\+[sst]\b|[0-7]{0,2}[12467][0-7]{3}\b)",
          "chmod 设置 setuid/setgid/sticky 权限位", 85),
     Rule("PRI-002", "PrivilegeEscalation", "high",
          r"(?i)\bchmod\s+777\b",
