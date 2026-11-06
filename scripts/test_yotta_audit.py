@@ -15,11 +15,16 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 SCRIPT = HERE / "yotta_audit.py"
-FIX = HERE.parent.parent.parent / ".tmp" / "audit-fixtures"
+FIXTURE_ARCHIVE = HERE / "testdata" / "audit-fixtures.zip"
+_FIXTURE_TMP = tempfile.TemporaryDirectory(prefix="yotta-audit-fixtures-")
+FIX = Path(_FIXTURE_TMP.name)
+with zipfile.ZipFile(FIXTURE_ARCHIVE) as _fixture_zip:
+    _fixture_zip.extractall(FIX)
 KEEP = "--keep" in sys.argv
 sys.path.insert(0, str(HERE))
 import audit_rules as ar  # noqa: E402

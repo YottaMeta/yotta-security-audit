@@ -23,6 +23,8 @@
     "assets",
     "bin",
     "README.zh-CN.md",
+    "!scripts/testdata",
+    "!scripts/testdata/**",
     "!scripts/test_*.py",
     "!**/__pycache__",
     "!**/*.pyc"
